@@ -12,6 +12,9 @@ from time import time
 app = Flask(__name__)
 app.app_context().push()
 
+nouveau_param_obligatoire = ["content", "id"]
+nouveau_param_valid = ["image_url"] + nouveau_param_obligatoire
+
 def stream_response(headers, **params):
     debut = time()
     client = get_client_openai(headers)
@@ -24,7 +27,6 @@ def stream_response(headers, **params):
     except openai.AuthenticationError:
         yield {"ERREUR":"La cle API n'est pas bonne ou inexistante. Il faut la passer (par ordre de priorite) soit dans le Authorization Header ou la mettre dans une variable d'environnement tokenGPT ou OPENAI_API_KEY"}
     except KeyError:
-        print(filtered_params)
         yield filtered_params
     # print(f"Stream de la réponse total en {round(time()-debut, 2)}secs")
 
@@ -37,6 +39,8 @@ def get_pipeline(**filtered_params):
     image_url = None
     content = filtered_params.pop("content")
     if "image_url" in filtered_params: image_url = filtered_params.pop("image_url")
+    for param_valid in nouveau_param_valid:
+        if param_valid in filtered_params: filtered_params.pop(param_valid)
     pipeline = {**filtered_params, **{"input":[{"role":"user", "content":get_content_and_images(content, image_url)}]}, **{"stream":True}}
     return pipeline
 def gestion_parametres(client, **params):
@@ -57,14 +61,15 @@ def get_params_obligatoire(signature):
         inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
     ]
     if "input" in params_obligatoires: params_obligatoires.remove("input")
-    params_obligatoires.append("content")
+    for param_obligatoire in nouveau_param_obligatoire:
+        params_obligatoires.append(param_obligatoire)
     return params_obligatoires
 def get_filtered_params(signature, **params):
     valid_params = list(signature.parameters.keys())
     if "stream" in valid_params: valid_params.remove("stream")
     if "input" in valid_params: valid_params.remove("input")
-    valid_params.append("content")
-    valid_params.append("image_url")
+    for param_valid in nouveau_param_valid:
+        valid_params.append(param_valid)
     filtered_params = {k: v for k, v in params.items() if k in valid_params}
     return filtered_params
 
