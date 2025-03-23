@@ -13,7 +13,6 @@ def serialize(obj):
 def handle_event(event):
     # print(type(event).__name__)
     if isinstance(event, ResponseTextDeltaEvent):
-        print(event.delta)
         yield {'type': 'delta', 'content': event.delta, 'allEvent': serialize(event)}
     # elif isinstance(event, ResponseCompletedEvent):
     #     output = ""

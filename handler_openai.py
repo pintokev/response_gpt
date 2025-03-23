@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 import types
@@ -11,39 +12,74 @@ from time import time
 app = Flask(__name__)
 app.app_context().push()
 
-def stream_response(headers, params):
-
+def stream_response(headers, **params):
     debut = time()
     client = get_client_openai(headers)
-
+    filtered_params = gestion_parametres(client, **params)
     try:
-        stream = client.responses.create(
-            model="gpt-4o",
-            input=[
-                {
-                    "role": "user",
-                    "content": "quel est la météo de demain ? J'habite à Alfortville",
-                },
-            ],
-            stream=True,
-        )
+        if "ERREUR" in filtered_params: raise KeyError("KeyError")
+        stream = client.responses.create(**get_pipeline(**filtered_params))
         for event in stream:
             yield handle_event(event)
     except openai.AuthenticationError:
         yield {"ERREUR":"La cle API n'est pas bonne ou inexistante. Il faut la passer (par ordre de priorite) soit dans le Authorization Header ou la mettre dans une variable d'environnement tokenGPT ou OPENAI_API_KEY"}
+    except KeyError:
+        print(filtered_params)
+        yield filtered_params
     # print(f"Stream de la réponse total en {round(time()-debut, 2)}secs")
+
+def get_content_and_images(content, image_url):
+    if image_url is not None:
+        return [{"type":"input_text", "text": content},
+                {"type": "input_image","image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"}]
+    else: return content
+def get_pipeline(**filtered_params):
+    image_url = None
+    content = filtered_params.pop("content")
+    if "image_url" in filtered_params: image_url = filtered_params.pop("image_url")
+    pipeline = {**filtered_params, **{"input":[{"role":"user", "content":get_content_and_images(content, image_url)}]}, **{"stream":True}}
+    return pipeline
+def gestion_parametres(client, **params):
+    signature = inspect.signature(client.responses.create)
+    filtered_params = get_filtered_params(signature, **params)
+    verification, param = verifier_params_obligatoires(signature, **filtered_params)
+    if verification: return filtered_params
+    else: return {"ERREUR":f"Il manque le paramètre obligatoire {param} dans la requête"}
+def verifier_params_obligatoires(signature, **filtered_params):
+    for param in get_params_obligatoire(signature):
+        if param not in filtered_params:
+            return False, param
+    return True, None
+def get_params_obligatoire(signature):
+    params_obligatoires = [
+        name for name, param in signature.parameters.items()
+        if param.default == inspect.Parameter.empty and param.kind in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    ]
+    if "input" in params_obligatoires: params_obligatoires.remove("input")
+    params_obligatoires.append("content")
+    return params_obligatoires
+def get_filtered_params(signature, **params):
+    valid_params = list(signature.parameters.keys())
+    if "stream" in valid_params: valid_params.remove("stream")
+    if "input" in valid_params: valid_params.remove("input")
+    valid_params.append("content")
+    valid_params.append("image_url")
+    filtered_params = {k: v for k, v in params.items() if k in valid_params}
+    return filtered_params
 
 @app.route('/stream', methods=["POST"])
 def stream():
     body = request.json
     headers = request.headers
     def generate():
-        response = {"error":"Pas un generateur"}
-        for data in stream_response(headers, body):
+        response = {"ERREUR":"Pas un generateur"}
+        for data in stream_response(headers, **body):
             if isinstance(data, types.GeneratorType):
                 response = list(data)[0]
             elif isinstance(data, dict): response = data
-            yield response["content"]
+            if "ERREUR" in response: yield "ERREUR - " + response["ERREUR"]
+            else: yield response["content"]
         yield "\n"
     return Response(generate(), content_type='application/json')
 
