@@ -8,27 +8,14 @@ from flask import Flask, request, jsonify, Response
 from openai import OpenAI
 from handler_gpt_event import handle_event
 from time import time
+from handler_data import Data
 
 app = Flask(__name__)
 app.app_context().push()
+PORT = 5000
 
-nouveau_param_obligatoire = ["content", "id"]
+nouveau_param_obligatoire = ["content"]
 nouveau_param_valid = ["image_url"] + nouveau_param_obligatoire
-
-def stream_response(headers, **params):
-    debut = time()
-    client = get_client_openai(headers)
-    filtered_params = gestion_parametres(client, **params)
-    try:
-        if "ERREUR" in filtered_params: raise KeyError("KeyError")
-        stream = client.responses.create(**get_pipeline(**filtered_params))
-        for event in stream:
-            yield handle_event(event)
-    except openai.AuthenticationError:
-        yield {"ERREUR":"La cle API n'est pas bonne ou inexistante. Il faut la passer (par ordre de priorite) soit dans le Authorization Header ou la mettre dans une variable d'environnement tokenGPT ou OPENAI_API_KEY"}
-    except KeyError:
-        yield filtered_params
-    # print(f"Stream de la réponse total en {round(time()-debut, 2)}secs")
 
 def get_content_and_images(content, image_url):
     if image_url is not None:
@@ -73,21 +60,6 @@ def get_filtered_params(signature, **params):
     filtered_params = {k: v for k, v in params.items() if k in valid_params}
     return filtered_params
 
-@app.route('/stream', methods=["POST"])
-def stream():
-    body = request.json
-    headers = request.headers
-    def generate():
-        response = {"ERREUR":"Pas un generateur"}
-        for data in stream_response(headers, **body):
-            if isinstance(data, types.GeneratorType):
-                response = list(data)[0]
-            elif isinstance(data, dict): response = data
-            if "ERREUR" in response: yield "ERREUR - " + response["ERREUR"]
-            else: yield response["content"]
-        yield "\n"
-    return Response(generate(), content_type='application/json')
-
 def get_client_openai(headers):
     try: return OpenAI(api_key=headers.get('Authorization'))
     except:
@@ -95,7 +67,62 @@ def get_client_openai(headers):
             return OpenAI(api_key=os.environ.get("tokenGPT"))
         except:
             return OpenAI()
-    return 0
+def generate_response(headers, body, user_data):
+    def generate():
+        response = {"ERREUR": "Pas un generateur"}
+        for data in get_response_openai(headers, user_data, **body):
+            if isinstance(data, types.GeneratorType):
+                response = list(data)[0]
+            elif isinstance(data, dict):
+                response = data
+            if response["type"] != "complete":
+                if "ERREUR" in response:
+                    yield "ERREUR - " + response["ERREUR"]
+                else:
+                    yield response["content"]
+            else: user_data.add_historique("assistant", response["content"])
+        yield "\n"
+    return generate()
+def get_response_openai(headers, user_data, **params):
+    debut = time()
+    client = get_client_openai(headers)
+    filtered_params = gestion_parametres(client, **params)
+    pipeline = create_pipeline(user_data, **filtered_params)
+    try:
+        if "ERREUR" in filtered_params: raise KeyError("KeyError")
+        stream = client.responses.create(**pipeline)
+        for event in stream:
+            yield handle_event(event)
+    except openai.AuthenticationError:
+        yield {"ERREUR":"La cle API n'est pas bonne ou inexistante. Il faut la passer (par ordre de priorite) soit dans le Authorization Header ou la mettre dans une variable d'environnement tokenGPT ou OPENAI_API_KEY"}
+    except KeyError:
+        yield filtered_params
+    # print(f"Stream de la réponse total en {round(time()-debut, 2)}secs")
+def create_pipeline(user_data, **filtered_params):
+    pipeline = get_pipeline(**filtered_params)
+    conversation = user_data.get_historique()
+    conversation.append(pipeline["input"][0])
+    pipeline["input"] = conversation
+    user_data.change_historique(conversation)
+    instructions = user_data.get_instructions()
+    if "instructions" in instructions and instructions is not None: pipeline["instructions"] = instructions["instructions"]
+    return pipeline
+
+
+@app.route('/stream', methods=["POST"])
+def stream():
+    body = request.json
+    headers = request.headers
+    body = {**body, **{"tools":[{ "type": "web_search_preview" }]}}
+    user_data = Data(body.pop("id"))
+    return Response(generate_response(headers, body, user_data), content_type='application/json')
+
+# @app.route('/search', methods=["POST"])
+# def search():
+#     body = request.json+
+#     headers = request.headers
+#     return Response(generate_response(headers, body), content_type='application/json')
+
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=PORT)
