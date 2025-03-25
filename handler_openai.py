@@ -9,6 +9,7 @@ from openai import OpenAI
 from handler_gpt_event import handle_event
 from time import time
 from handler_data import Data
+import requests
 
 app = Flask(__name__)
 app.app_context().push()
@@ -17,6 +18,7 @@ PORT = 5000
 nouveau_param_obligatoire = ["content"]
 nouveau_param_valid = ["image_url"] + nouveau_param_obligatoire
 
+########## Pour la route stream ##########
 def get_content_and_images(content, image_url):
     if image_url is not None:
         return [{"type":"input_text", "text": content},
@@ -59,7 +61,7 @@ def get_filtered_params(signature, **params):
         valid_params.append(param_valid)
     filtered_params = {k: v for k, v in params.items() if k in valid_params}
     return filtered_params
-
+##### Partie OPENAI #####
 def get_client_openai(headers):
     try: return OpenAI(api_key=headers.get('Authorization'))
     except:
@@ -80,7 +82,14 @@ def generate_response(headers, body, user_data):
                     yield "ERREUR - " + response["ERREUR"]
                 else:
                     yield response["content"]
-            else: user_data.add_historique("assistant", response["content"])
+            else:
+                user_data.add_historique("assistant", response["content"])
+                # print(body["tools"])
+                body["content"] = response["content"]
+                body["tools"] = []
+                rep = requests.post(f"http://localhost:{PORT}/function", headers=headers, json=body)
+                # print(rep)
+                yield "\n\n" + rep.text + "\n"
         yield "\n"
     return generate()
 def get_response_openai(headers, user_data, **params):
@@ -107,21 +116,93 @@ def create_pipeline(user_data, **filtered_params):
     instructions = user_data.get_instructions()
     if "instructions" in instructions and instructions is not None: pipeline["instructions"] = instructions["instructions"]
     return pipeline
+########## fin stream ##########
 
+########## Pour la route instructions ##########
+def verif_param_instructions(body):
+    try: body.get("instruction")
+    except: return "Le paramètre instruction doit être présent dans le post"
+########## fin instructions ##########
+
+########## Pour la route file-search ##########
+def send_to_openai_vector(headers, file):
+    client = get_client_openai(headers)
+    openai_file = client.files.create(purpose="user_data", file=(file.filename, file.read()))
+    vector_store = client.vector_stores.create(name="Fichiers", file_ids=[openai_file.id])
+    return vector_store.id
+########## fin file-search ##########
 
 @app.route('/stream', methods=["POST"])
 def stream():
     body = request.json
+    # print(body)
     headers = request.headers
     body = {**body, **{"tools":[{ "type": "web_search_preview" }]}}
     user_data = Data(body.pop("id"))
+    if user_data.get_vector() != "": body["tools"].append({ "type": "file_search", "vector_store_ids": user_data.get_vector(),"max_num_results": 20})
     return Response(generate_response(headers, body, user_data), content_type='application/json')
 
-# @app.route('/search', methods=["POST"])
-# def search():
-#     body = request.json+
-#     headers = request.headers
-#     return Response(generate_response(headers, body), content_type='application/json')
+@app.route('/instructions', methods=["POST"])
+def instructions():
+    body = request.json
+
+    try: body.get("id")
+    except: return "Le paramètre id doit être présent dans le post"
+
+    user_data = Data(body.pop("id"))
+    if request.args.get("remove") is not None:
+        user_data.remove_instructions()
+        return "L'instruction à été supprimée"
+    elif request.args.get("add") is not None:
+        verif_param_instructions(body)
+        user_data.add_instructions(body["instruction"])
+        return "L'instruction à été ajoutée"
+    else:
+        verif_param_instructions(body)
+        user_data.change_instructions(body["instruction"])
+        return "L'instruction à été modifiée"
+
+@app.route('/file-search', methods=["POST"])
+def file_search():
+    headers = request.headers
+    body = json.loads(request.form.get("data"))
+    if 'file' not in request.files: return "Utilisation de file-search sans fichier dans la requête\n", 400
+    file = request.files['file']
+    if file.filename == '': return "Aucun fichier renseigné\n", 400
+    user_data = Data(body.pop("id"))
+    vector_id = send_to_openai_vector(headers, file)
+    user_data.add_vector(vector_id)
+    return "File received\n", 200
+
+
+def create_ticket_incident(args):
+    args = json.loads(args)
+    # application, horaire_debut, horaire_fin, type_ticket, isOpenBar
+    if args["isOpenBar"]: rep = f"Ticket {args['type_ticket']} sur {args['application']} créé sur la période {args['horaire_debut']} à {args['horaire_fin']} avec assistance de l'open bar"
+    else: rep = f"Ticket {args['type_ticket']} sur {args['application']} créé sur la période {args['horaire_debut']} à {args['horaire_fin']} sans assistance de l'open bar"
+    # print(rep)
+    return rep
+
+@app.route('/function', methods=["POST"])
+def openai_function():
+    headers = request.headers
+    body = request.json
+    with open("function.json", "r") as file:
+        tools = json.load(file)
+    # body = {**body, **{"tools":tools}}
+    client = get_client_openai(headers)
+    # print(body)
+    response = client.responses.create(
+        model=body["model"],
+        input=[{"role": "user", "content": body["content"]}],
+        tools=tools
+    )
+    # print(response.output[0].arguments)
+    try: return globals()[response.output[0].name](response.output[0].arguments)
+    except: return ""
+    # try:
+    #     return globals()[response.output[0].name](**response.output[0].arguments)
+    # except: return ""
 
 
 if __name__ == '__main__':
