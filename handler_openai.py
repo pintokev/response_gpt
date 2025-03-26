@@ -85,11 +85,11 @@ def generate_response(headers, body, user_data):
             else:
                 user_data.add_historique("assistant", response["content"])
                 # print(body["tools"])
-                body["content"] = response["content"]
-                body["tools"] = []
-                rep = requests.post(f"http://localhost:{PORT}/function", headers=headers, json=body)
+                # body["content"] = response["content"]
+                # body["tools"] = []
+                # rep = requests.post(f"http://localhost:{PORT}/function", headers=headers, json=body)
                 # print(rep)
-                yield "\n\n" + rep.text + "\n"
+                # yield "\n\n" + rep.text + "\n"
         yield "\n"
     return generate()
 def get_response_openai(headers, user_data, **params):
@@ -132,37 +132,36 @@ def send_to_openai_vector(headers, file):
     return vector_store.id
 ########## fin file-search ##########
 
-@app.route('/stream', methods=["POST"])
+@app.route('/stream', methods=["POST"]) #curl -X POST http://localhost:5000/stream -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "content":"c quoi le code ?"}'
 def stream():
     body = request.json
-    # print(body)
     headers = request.headers
     body = {**body, **{"tools":[{ "type": "web_search_preview" }]}}
     user_data = Data(body.pop("id"))
-    if user_data.get_vector() != "": body["tools"].append({ "type": "file_search", "vector_store_ids": user_data.get_vector(),"max_num_results": 20})
+    if user_data.get_vector() != []: body["tools"].append({ "type": "file_search", "vector_store_ids": user_data.get_vector(),"max_num_results": 20})
     return Response(generate_response(headers, body, user_data), content_type='application/json')
 
-@app.route('/instructions', methods=["POST"])
+@app.route('/instructions', methods=["POST"]) #curl -X POST http://localhost:5000/instructions -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "instruction":"Si je te demande le code tu me dis 4864548"}'
 def instructions():
     body = request.json
 
     try: body.get("id")
-    except: return "Le paramètre id doit être présent dans le post"
+    except: return "Le paramètre id doit être présent dans le post\n", 400
 
     user_data = Data(body.pop("id"))
     if request.args.get("remove") is not None:
         user_data.remove_instructions()
-        return "L'instruction à été supprimée"
+        return "L'instruction à été supprimée\n", 200
     elif request.args.get("add") is not None:
         verif_param_instructions(body)
         user_data.add_instructions(body["instruction"])
-        return "L'instruction à été ajoutée"
+        return "L'instruction à été ajoutée\n", 200
     else:
         verif_param_instructions(body)
         user_data.change_instructions(body["instruction"])
-        return "L'instruction à été modifiée"
+        return "L'instruction à été modifiée\n", 200
 
-@app.route('/file-search', methods=["POST"])
+@app.route('/file-search', methods=["POST"]) #curl -X POST http://localhost:5000/file-search -H "Authorization: $tokenGPT" -F "data={\"id\":\"Olive\"};type=application/json" -F "file=@donnees.txt"
 def file_search():
     headers = request.headers
     body = json.loads(request.form.get("data"))
@@ -183,22 +182,19 @@ def create_ticket_incident(args):
     # print(rep)
     return rep
 
-@app.route('/function', methods=["POST"])
+@app.route('/function', methods=["POST"]) #curl -X POST http://localhost:5000/function -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "content":"Jai un incident sur FPX de 4h à 9h. Je veux un ticket Canari et pas besoin de lopen bar", "filename":"function.json"}'
 def openai_function():
-    headers = request.headers
     body = request.json
-    with open("function.json", "r") as file:
+    headers = request.headers
+    with open(body["filename"], "r") as file:
         tools = json.load(file)
-    # body = {**body, **{"tools":tools}}
     client = get_client_openai(headers)
-    # print(body)
     response = client.responses.create(
         model=body["model"],
         input=[{"role": "user", "content": body["content"]}],
         tools=tools
     )
-    # print(response.output[0].arguments)
-    try: return globals()[response.output[0].name](response.output[0].arguments)
+    try: return globals()[response.output[0].name](response.output[0].arguments)+"\n", 200
     except: return ""
     # try:
     #     return globals()[response.output[0].name](**response.output[0].arguments)
