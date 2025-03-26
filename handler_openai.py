@@ -132,6 +132,16 @@ def send_to_openai_vector(headers, file):
     return vector_store.id
 ########## fin file-search ##########
 
+########## Pour la route function ##########
+def create_ticket_incident(args):
+    args = json.loads(args)
+    # application, horaire_debut, horaire_fin, type_ticket, isOpenBar
+    if args["isOpenBar"]: rep = f"Ticket {args['type_ticket']} sur {args['application']} créé sur la période {args['horaire_debut']} à {args['horaire_fin']} avec assistance de l'open bar"
+    else: rep = f"Ticket {args['type_ticket']} sur {args['application']} créé sur la période {args['horaire_debut']} à {args['horaire_fin']} sans assistance de l'open bar"
+    # print(rep)
+    return rep
+########## fin function ##########
+
 @app.route('/stream', methods=["POST"]) #curl -X POST http://localhost:5000/stream -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "content":"c quoi le code ?"}'
 def stream():
     body = request.json
@@ -172,15 +182,6 @@ def file_search():
     vector_id = send_to_openai_vector(headers, file)
     user_data.add_vector(vector_id)
     return "File received\n", 200
-
-
-def create_ticket_incident(args):
-    args = json.loads(args)
-    # application, horaire_debut, horaire_fin, type_ticket, isOpenBar
-    if args["isOpenBar"]: rep = f"Ticket {args['type_ticket']} sur {args['application']} créé sur la période {args['horaire_debut']} à {args['horaire_fin']} avec assistance de l'open bar"
-    else: rep = f"Ticket {args['type_ticket']} sur {args['application']} créé sur la période {args['horaire_debut']} à {args['horaire_fin']} sans assistance de l'open bar"
-    # print(rep)
-    return rep
 
 @app.route('/function', methods=["POST"]) #curl -X POST http://localhost:5000/function -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "content":"Jai un incident sur FPX de 4h à 9h. Je veux un ticket Canari et pas besoin de lopen bar", "filename":"function.json"}'
 def openai_function():
