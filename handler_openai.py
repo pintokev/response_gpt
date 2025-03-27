@@ -215,7 +215,7 @@ def clear():
     id = body.pop("id")
     user_data = Data(id)
     client = get_client_openai(headers)
-    if user_data.get_vector() != []: client.vector_stores.delete(user_data.get_vector())
+    if user_data.get_vector() != []: client.vector_stores.delete(user_data.get_vector()[0])
     user_data.clear()
     return f"Données de {id} entièrement supprimé\n"
 
