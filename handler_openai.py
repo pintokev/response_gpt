@@ -13,7 +13,7 @@ import requests
 
 app = Flask(__name__)
 app.app_context().push()
-PORT = 5000
+PORT = 25789
 
 nouveau_param_obligatoire = ["content"]
 nouveau_param_valid = ["image_url"] + nouveau_param_obligatoire
@@ -21,9 +21,10 @@ nouveau_param_valid = ["image_url"] + nouveau_param_obligatoire
 ########## Pour la route stream ##########
 def get_content_and_images(content, image_url):
     if image_url is not None:
-        return [{"type":"input_text", "text": content},
-                {"type": "input_image","image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"}]
-    else: return content
+        content = [{"type":"input_text", "text": content}]
+        for image in image_url:
+            content.append({"type": "input_image","image_url": image})
+    return content
 def get_pipeline(**filtered_params):
     image_url = None
     content = filtered_params.pop("content")
@@ -97,6 +98,7 @@ def get_response_openai(headers, user_data, **params):
     client = get_client_openai(headers)
     filtered_params = gestion_parametres(client, **params)
     pipeline = create_pipeline(user_data, **filtered_params)
+    # print(pipeline)
     try:
         if "ERREUR" in filtered_params: raise KeyError("KeyError")
         stream = client.responses.create(**pipeline)
@@ -125,11 +127,15 @@ def verif_param_instructions(body):
 ########## fin instructions ##########
 
 ########## Pour la route file-search ##########
-def send_to_openai_vector(headers, file):
+def send_to_openai_vector(headers, file, user_data):
     client = get_client_openai(headers)
     openai_file = client.files.create(purpose="user_data", file=(file.filename, file.read()))
-    vector_store = client.vector_stores.create(name="Fichiers", file_ids=[openai_file.id])
-    return vector_store.id
+    if user_data.get_vector() == []:
+        vector_store = client.vector_stores.create(name="Fichiers", file_ids=[openai_file.id])
+        return vector_store.id
+    else:
+        client.vector_stores.files.create(user_data.get_vector()[0], file_id=openai_file.id)
+        return None
 ########## fin file-search ##########
 
 ########## Pour la route function ##########
@@ -149,6 +155,7 @@ def stream():
     body = {**body, **{"tools":[{ "type": "web_search_preview" }]}}
     user_data = Data(body.pop("id"))
     if user_data.get_vector() != []: body["tools"].append({ "type": "file_search", "vector_store_ids": user_data.get_vector(),"max_num_results": 20})
+    # print(body)
     return Response(generate_response(headers, body, user_data), content_type='application/json')
 
 @app.route('/instructions', methods=["POST"]) #curl -X POST http://localhost:5000/instructions -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "instruction":"Si je te demande le code tu me dis 4864548"}'
@@ -179,8 +186,8 @@ def file_search():
     file = request.files['file']
     if file.filename == '': return "Aucun fichier renseigné\n", 400
     user_data = Data(body.pop("id"))
-    vector_id = send_to_openai_vector(headers, file)
-    user_data.add_vector(vector_id)
+    vector_id = send_to_openai_vector(headers, file, user_data)
+    if vector_id is not None: user_data.add_vector(vector_id)
     return "File received\n", 200
 
 @app.route('/function', methods=["POST"]) #curl -X POST http://localhost:5000/function -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "content":"Jai un incident sur FPX de 4h à 9h. Je veux un ticket Canari et pas besoin de lopen bar", "filename":"function.json"}'
@@ -201,6 +208,30 @@ def openai_function():
     #     return globals()[response.output[0].name](**response.output[0].arguments)
     # except: return ""
 
+@app.route('/clear', methods=["POST"])
+def clear():
+    headers = request.headers
+    body = request.json
+    id = body.pop("id")
+    user_data = Data(id)
+    client = get_client_openai(headers)
+    if user_data.get_vector() != []: client.vector_stores.delete(user_data.get_vector())
+    user_data.clear()
+    return f"Données de {id} entièrement supprimé\n"
+
+@app.route('/remove_historique', methods=["POST"]) #curl -X POST http://localhost:5000/remove_historique -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive"}'
+def remove_historique():
+    body = request.json
+
+    try: body.get("id")
+    except: return "Le paramètre id doit être présent dans le post\n", 400
+    user_data = Data(body.pop("id"))
+    if request.args.get("remove_last") is not None:
+        user_data.remove_last_echange()
+        return "Le dernier échange a été supprimé\n", 200
+    else:
+        user_data.remove_historique()
+        return "L'historique à été supprimé\n", 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT)

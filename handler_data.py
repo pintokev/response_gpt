@@ -61,6 +61,12 @@ class Data:
     def remove_historique(self):
         historique_path = os.path.join(self.user_dossier , "historique.json")
         self.write_file(historique_path, [])
+    def remove_last_echange(self):
+        historique_path = os.path.join(self.user_dossier , "historique.json")
+        try:
+            historique = self.get_historique()[:-2]
+            self.write_file(historique_path, historique)
+        except: pass
     def change_historique(self, new_historique):
         historique_path = os.path.join(self.user_dossier , "historique.json")
         self.write_file(historique_path, new_historique)
@@ -76,7 +82,14 @@ class Data:
 
     def add_vector(self, vs_id):
         vs_path = os.path.join(self.user_dossier , "vector.json")
-        self.write_file(vs_path, [vs_id])
+        liste_vectors = self.get_vector()
+        liste_vectors.append(vs_id)
+        self.write_file(vs_path, liste_vectors)
+
+    def clear(self):
+        import shutil
+        shutil.rmtree(self.user_dossier)
+
 
 
 if __name__ == '__main__':
