@@ -152,11 +152,10 @@ def create_ticket_incident(args):
 def stream():
     body = request.json
     headers = request.headers
-    body = {**body, **{"tools":[{ "type": "web_search_preview" }]}}
+    if "reasonning" not in body: body = {**body, **{"tools":[{ "type": "web_search_preview" }]}}
     user_data = Data(body.pop("id"))
     if "instructions" in body and "instructions" in user_data.get_instructions(): body["instructions"] += user_data.get_instructions()["instructions"]
     if user_data.get_vector() != []: body["tools"].append({ "type": "file_search", "vector_store_ids": user_data.get_vector(),"max_num_results": 20})
-    # print(body)
     return Response(generate_response(headers, body, user_data), content_type='application/json')
 
 @app.route('/instructions', methods=["POST"]) #curl -X POST http://localhost:5000/instructions -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "instruction":"Si je te demande le code tu me dis 4864548"}'
