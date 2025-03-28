@@ -190,7 +190,7 @@ def file_search():
     if vector_id is not None: user_data.add_vector(vector_id)
     print(body)
     # if "content" in body: requests.post("http://localhost:5000/stream", json=)
-    return "Fichiers reçu\n", 200
+    return body, 200
 
 @app.route('/function', methods=["POST"]) #curl -X POST http://localhost:5000/function -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "content":"Jai un incident sur FPX de 4h à 9h. Je veux un ticket Canari et pas besoin de lopen bar", "filename":"function.json"}'
 def openai_function():
