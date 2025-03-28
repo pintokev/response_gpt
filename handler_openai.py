@@ -154,7 +154,7 @@ def stream():
     headers = request.headers
     body = {**body, **{"tools":[{ "type": "web_search_preview" }]}}
     user_data = Data(body.pop("id"))
-    if "instructions" in body: body["instructions"] += user_data.get_instructions()
+    if "instructions" in body and "instructions" in user_data.get_instructions(): body["instructions"] += user_data.get_instructions()["instructions"]
     if user_data.get_vector() != []: body["tools"].append({ "type": "file_search", "vector_store_ids": user_data.get_vector(),"max_num_results": 20})
     # print(body)
     return Response(generate_response(headers, body, user_data), content_type='application/json')
