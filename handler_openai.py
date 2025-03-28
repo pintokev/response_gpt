@@ -189,7 +189,7 @@ def file_search():
     user_data = Data(body.pop("id"))
     vector_id = send_to_openai_vector(headers, file, user_data)
     if vector_id is not None: user_data.add_vector(vector_id)
-    if "content" in body: Response(generate_response(headers, temp_body, user_data), content_type='application/json')
+    if "content" in body: return Response(generate_response(headers, temp_body, user_data), content_type='application/json')
     else: return "Fichier(s) reçu", 200
 
 @app.route('/function', methods=["POST"]) #curl -X POST http://localhost:5000/function -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "content":"Jai un incident sur FPX de 4h à 9h. Je veux un ticket Canari et pas besoin de lopen bar", "filename":"function.json"}'
