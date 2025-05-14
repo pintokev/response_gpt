@@ -168,7 +168,7 @@ def instructions():
     user_data = Data(body.pop("id"))
     if request.args.get("remove") is not None:
         user_data.remove_instructions()
-        return "L'instruction à été supprimée\n", 200
+        return "L'instruction à été supprimée\n" , 200
     elif request.args.get("add") is not None:
         verif_param_instructions(body)
         user_data.add_instructions(body["instruction"])
@@ -182,7 +182,6 @@ def instructions():
 def file_search():
     headers = request.headers
     body = json.loads(request.form.get("data"))
-    temp_body = body
     if 'file' not in request.files: return "Utilisation de file-search sans fichier dans la requête\n", 400
     file = request.files['file']
     if file.filename == '': return "Aucun fichier renseigné\n", 400
@@ -233,6 +232,18 @@ def remove_historique():
     else:
         user_data.remove_historique()
         return "L'historique à été supprimé\n", 200
+
+@app.route("/images", methods=["POST"])
+def images():
+    import base64
+    headers = request.headers
+    body = json.loads(request.form.get("data"))
+    client = get_client_openai(headers)
+    img = client.images.generate(
+        **body
+    )
+    return img.data[0].url
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT)
