@@ -235,14 +235,30 @@ def remove_historique():
 
 @app.route("/images", methods=["POST"])
 def images():
-    import base64
     headers = request.headers
     body = json.loads(request.form.get("data"))
     client = get_client_openai(headers)
     img = client.images.generate(
         **body
     )
-    return img.data[0].url
+    return img.data[0].b64_json
+
+@app.route("/edit_images", methods=["POST"])
+def edit_images():
+    headers = request.headers
+    body = json.loads(request.form.get("data"))
+    client = get_client_openai(headers)
+
+    file = request.files['file']
+    file.save("image.png")
+
+    img = client.images.edit(
+        image=open("image.png", "rb"),
+        **body
+    )
+    import os
+    os.remove("image.png")
+    return img.data[0].b64_json
 
 
 if __name__ == '__main__':
