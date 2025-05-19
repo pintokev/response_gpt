@@ -71,6 +71,20 @@ class Data:
         historique_path = os.path.join(self.user_dossier , "historique.json")
         self.write_file(historique_path, new_historique)
 
+    def add_historique_image(self, content):
+        image_path = os.path.join(self.user_dossier, "image_historique.png")
+        with open(image_path, "wb") as file:
+            file.write(content)
+    def remove_historique_image(self):
+        image_path = os.path.join(self.user_dossier, "image_historique.png")
+        os.remove(image_path)
+    def get_historique_image(self):
+        image_path = os.path.join(self.user_dossier, "image_historique.png")
+        if os.path.exists(image_path):
+            return open(image_path, "rb")
+        else: return False
+
+
     def get_function_tools(self):
         return self.read_file(self.user_dossier + "/function_tools.json")
     def get_historique(self):

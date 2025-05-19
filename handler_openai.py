@@ -1,3 +1,4 @@
+import base64
 import inspect
 import json
 import os
@@ -13,7 +14,7 @@ import requests
 
 app = Flask(__name__)
 app.app_context().push()
-PORT = 25789
+PORT = 8080
 
 nouveau_param_obligatoire = ["content"]
 nouveau_param_valid = ["image_url"] + nouveau_param_obligatoire
@@ -64,7 +65,9 @@ def get_filtered_params(signature, **params):
     return filtered_params
 ##### Partie OPENAI #####
 def get_client_openai(headers):
-    try: return OpenAI(api_key=headers.get('Authorization'))
+    try:
+        if not "sk-proj" in headers.get('Authorization'): raise
+        return OpenAI(api_key=headers.get('Authorization'))
     except:
         try:
             return OpenAI(api_key=os.environ.get("tokenGPT"))
@@ -237,29 +240,34 @@ def remove_historique():
 def images():
     headers = request.headers
     body = json.loads(request.form.get("data"))
+    try: body.get("id")
+    except: return "Le paramètre id doit être présent dans le post\n", 400
+    user_data = Data(body.pop("id"))
+    images = []
+    files = []
+    if user_data.get_historique_image():
+        images.append(user_data.get_historique_image())
+        files.append(user_data.get_historique_image())
+    for i, file in enumerate(request.files.getlist('file')):
+        filename = f"image_{i}.png"
+        file.save(filename)
+        f = open(filename, "rb")
+        images.append(f)
+        files.append(f)
     client = get_client_openai(headers)
-    img = client.images.generate(
-        **body
-    )
+    if len(images)>0:
+        img = client.images.edit(
+            image=images,
+            **body
+        )
+    else:
+        img = client.images.generate(
+            **body
+        )
+    user_data.add_historique_image(base64.b64decode(img.data[0].b64_json))
+    for f in files:
+        f.close()
     return img.data[0].b64_json
-
-@app.route("/edit_images", methods=["POST"])
-def edit_images():
-    headers = request.headers
-    body = json.loads(request.form.get("data"))
-    client = get_client_openai(headers)
-
-    file = request.files['file']
-    file.save("image.png")
-
-    img = client.images.edit(
-        image=open("image.png", "rb"),
-        **body
-    )
-    import os
-    os.remove("image.png")
-    return img.data[0].b64_json
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT)
