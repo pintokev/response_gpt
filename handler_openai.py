@@ -269,5 +269,33 @@ def images():
         f.close()
     return img.data[0].b64_json
 
+
+@app.route("/new_images", methods=["POST"])
+def images():
+    headers = request.headers
+    body = json.loads(request.form.get("data"))
+    images = []
+    files = []
+    for i, file in enumerate(request.files.getlist('file')):
+        filename = f"image_{i}.png"
+        file.save(filename)
+        f = open(filename, "rb")
+        images.append(f)
+        files.append(f)
+    client = get_client_openai(headers)
+    if len(images)>0:
+        img = client.images.edit(
+            image=images,
+            **body
+        )
+    else:
+        img = client.images.generate(
+            **body
+        )
+    for f in files:
+        f.close()
+    return img.data[0].b64_json
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT)
