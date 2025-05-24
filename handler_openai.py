@@ -271,7 +271,7 @@ def images():
 
 
 @app.route("/new_images", methods=["POST"])
-def images():
+def new_images():
     headers = request.headers
     body = json.loads(request.form.get("data"))
     images = []
