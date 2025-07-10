@@ -15,6 +15,8 @@ import requests
 app = Flask(__name__)
 app.app_context().push()
 PORT = 8080
+BASE_URL = "https://llmproxy.ai.orange"
+PROXY=False
 
 nouveau_param_obligatoire = ["content"]
 nouveau_param_valid = ["image_url"] + nouveau_param_obligatoire
@@ -65,43 +67,40 @@ def get_filtered_params(signature, **params):
     return filtered_params
 ##### Partie OPENAI #####
 def get_client_openai(headers):
+    # print(headers.get('Authorization'))
+    # return OpenAI(api_key=headers.get('Authorization'), base_url=str(BASE_URL))
     try:
-        if not "sk-proj" in headers.get('Authorization'): raise
-        return OpenAI(api_key=headers.get('Authorization'))
+        if not "sk-" in headers.get('Authorization'): raise
+        if not PROXY: return openai.OpenAI(api_key=headers.get('Authorization'))
+        else: return openai.OpenAI(api_key=headers.get('Authorization'), base_url=BASE_URL)
     except:
         try:
-            return OpenAI(api_key=os.environ.get("tokenGPT"))
+            if not PROXY: return openai.OpenAI(api_key=os.environ.get("tokenGPT"))
+            else: return openai.OpenAI(api_key=headers.get('Authorization'), base_url=BASE_URL)
         except:
-            return OpenAI()
-def generate_response(headers, body, user_data):
+            if not PROXY: return openai.OpenAI()
+            else: return openai.OpenAI(api_key=headers.get('Authorization'), base_url=BASE_URL)
+def generate_response(client, body, user_data):
     def generate():
         response = {"ERREUR": "Pas un generateur"}
-        for data in get_response_openai(headers, user_data, **body):
+        for data in get_response_openai(client, user_data, **body):
             if isinstance(data, types.GeneratorType):
                 response = list(data)[0]
             elif isinstance(data, dict):
                 response = data
-            if response["type"] != "complete":
+            if response.get("type") != "complete":
                 if "ERREUR" in response:
                     yield "ERREUR - " + response["ERREUR"]
                 else:
-                    yield response["content"]
+                    yield response.get("content", "")
             else:
-                user_data.add_historique("assistant", response["content"])
-                # print(body["tools"])
-                # body["content"] = response["content"]
-                # body["tools"] = []
-                # rep = requests.post(f"http://localhost:{PORT}/function", headers=headers, json=body)
-                # print(rep)
-                # yield "\n\n" + rep.text + "\n"
+                user_data.add_historique("assistant", response.get("content", ""))
         yield "\n"
     return generate()
-def get_response_openai(headers, user_data, **params):
+def get_response_openai(client, user_data, **params):
     debut = time()
-    client = get_client_openai(headers)
     filtered_params = gestion_parametres(client, **params)
     pipeline = create_pipeline(user_data, **filtered_params)
-    # print(pipeline)
     try:
         if "ERREUR" in filtered_params: raise KeyError("KeyError")
         stream = client.responses.create(**pipeline)
@@ -141,6 +140,14 @@ def send_to_openai_vector(headers, file, user_data):
         return None
 ########## fin file-search ##########
 
+########## Pour la route code-interpreter ##########
+def create_file(headers, file, user_data):
+    client = get_client_openai(headers)
+    openai_file = client.files.create(purpose="user_data", file=(file.filename, file.read()))
+    user_data.add_files(openai_file.id)
+########## fin code-interpreter ##########
+
+
 ########## Pour la route function ##########
 def create_ticket_incident(args):
     args = json.loads(args)
@@ -151,15 +158,24 @@ def create_ticket_incident(args):
     return rep
 ########## fin function ##########
 
-@app.route('/stream', methods=["POST"]) #curl -X POST http://localhost:5000/stream -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "content":"c quoi le code ?"}'
+########## Pour toutes utilisation du stream de réponse ##########
+def handler_stream(headers, body, user_data):
+    client = get_client_openai(headers)
+    if "reasonning" not in body: body = {**body, **{"tools": [{"type": "web_search_preview"}]}}
+    if "instructions" in body and "instructions" in user_data.get_instructions(): body["instructions"] += user_data.get_instructions()["instructions"]
+    if user_data.get_vector(): body["tools"].append({"type": "file_search", "vector_store_ids": user_data.get_vector(), "max_num_results": 20})
+    if user_data.get_files():
+        container = client.containers.create(name="test-container", file_ids=user_data.get_files())
+        body["tools"].append({"type": "code_interpreter", "container": container.id})
+    return Response(generate_response(client, body, user_data), content_type='application/json')
+########## fin du handler du stream ##########
+
+@app.route('/stream', methods=["POST"]) #c
 def stream():
     body = request.json
     headers = request.headers
-    if "reasonning" not in body: body = {**body, **{"tools":[{ "type": "web_search_preview" }]}}
     user_data = Data(body.pop("id"))
-    if "instructions" in body and "instructions" in user_data.get_instructions(): body["instructions"] += user_data.get_instructions()["instructions"]
-    if user_data.get_vector() != []: body["tools"].append({ "type": "file_search", "vector_store_ids": user_data.get_vector(),"max_num_results": 20})
-    return Response(generate_response(headers, body, user_data), content_type='application/json')
+    return handler_stream(headers, body, user_data)
 
 @app.route('/instructions', methods=["POST"]) #curl -X POST http://localhost:5000/instructions -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "instruction":"Si je te demande le code tu me dis 4864548"}'
 def instructions():
@@ -181,17 +197,38 @@ def instructions():
         user_data.change_instructions(body["instruction"])
         return "L'instruction à été modifiée\n", 200
 
-@app.route('/file-search', methods=["POST"]) #curl -X POST http://localhost:5000/file-search -H "Authorization: $tokenGPT" -F "data={\"id\":\"Olive\"};type=application/json" -F "file=@donnees.txt"
+@app.route('/file-search', methods=["POST"]) #curl -X POST http://localhost:8080/file-search -H "Authorization: $tokenGPT" -F "data={\"id\":\"Olive\", \"model\":\"gpt-4.1\"};type=application/json" -F "file=@donnees.txt"
 def file_search():
     headers = request.headers
     body = json.loads(request.form.get("data"))
-    if 'file' not in request.files: return "Utilisation de file-search sans fichier dans la requête\n", 400
-    file = request.files['file']
-    if file.filename == '': return "Aucun fichier renseigné\n", 400
+    print(request.files)
+    filenames = []
+    if 'file' not in request.files: return "Utilisation de file-search sans fichier dans la requête. Tu dois en mettre un\n", 400
     user_data = Data(body.pop("id"))
-    vector_id = send_to_openai_vector(headers, file, user_data)
-    if vector_id is not None: user_data.add_vector(vector_id)
-    return "Fichier(s) reçu", 200
+    for file in request.files.getlist("file"):
+        print(file.filename)
+        if file.filename == '': return "Aucun fichier renseigné\n", 400
+        filenames.append(file.filename)
+        vector_id = send_to_openai_vector(headers, file, user_data)
+        if vector_id is not None: user_data.add_vector(vector_id)
+    if "content" not in body:
+        body["content"] = f"Fais moi un message qui indiques que tu as bien reçu les fichiers suivants pour le file-search: {', '.join(map(str, filenames))}. Dans le vector {user_data.get_vector()[0]}"
+    return handler_stream(headers, body, user_data)
+
+@app.route('/code-interpreter', methods=["POST"]) #curl -X POST http://localhost:8080/code-interpreter -H "Authorization: $tokenGPT" -F "data={\"id\":\"Olive\", \"model\":\"gpt-4.1\"};type=application/json" -F "file=@handler_gpt_event.py" -F "file=@handler_data.py" -F "file=@handler_openai.py"
+def code_interpreter():
+    headers = request.headers
+    body = json.loads(request.form.get("data"))
+    filenames = []
+    if 'file' not in request.files: return "Utilisation de code interpreter sans fichier dans la requête. Tu dois en mettre un\n", 400
+    user_data = Data(body.pop("id"))
+    for file in request.files.getlist("file"):
+        if file.filename == '': return "Aucun fichier renseigné\n", 400
+        filenames.append(file.filename)
+        create_file(headers, file, user_data)
+    if "content" not in body:
+        body["content"] = f"Fais moi un message qui indiques que tu as bien reçu les fichiers suivants pour le code-interpreter: {', '.join(map(str, filenames))}. Avec les ID de files suivant : {', '.join(map(str, user_data.get_files()))}"
+    return handler_stream(headers, body, user_data)
 
 @app.route('/function', methods=["POST"]) #curl -X POST http://localhost:5000/function -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "content":"Jai un incident sur FPX de 4h à 9h. Je veux un ticket Canari et pas besoin de lopen bar", "filename":"function.json"}'
 def openai_function():

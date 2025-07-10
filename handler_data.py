@@ -6,7 +6,7 @@ class Data:
     def __init__(self, id):
         self.id = id
         self.user_dossier = "data/"+id
-        self.fichier = ['historique.json', 'instructions.json', 'function_tools.json', 'vector.json']
+        self.fichier = ['historique.json', 'instructions.json', 'function_tools.json', 'vector.json', "files.json"]
         self.set_all_path_files()
         self.init_directory()
 
@@ -31,7 +31,7 @@ class Data:
         for pathfile in self.fichier:
             if not os.path.exists(pathfile):
                 with open(pathfile, 'w') as f:
-                    if "historique" in pathfile or 'vector' in pathfile: dump([], f)
+                    if "historique" in pathfile or 'vector' in pathfile or "files" in pathfile: dump([], f)
                     else: dump({}, f)
 
     def add_instructions(self, new_instructions):
@@ -93,12 +93,20 @@ class Data:
         return self.read_file(self.user_dossier+"/instructions.json")
     def get_vector(self):
         return self.read_file(self.user_dossier+"/vector.json")
+    def get_files(self):
+        return self.read_file(self.user_dossier+"/files.json")
 
     def add_vector(self, vs_id):
         vs_path = os.path.join(self.user_dossier , "vector.json")
         liste_vectors = self.get_vector()
         liste_vectors.append(vs_id)
         self.write_file(vs_path, liste_vectors)
+
+    def add_files(self, file_id):
+        file_path = os.path.join(self.user_dossier, "files.json")
+        liste_files = self.get_files()
+        liste_files.append(file_id)
+        self.write_file(file_path, liste_files)
 
     def clear(self):
         import shutil
