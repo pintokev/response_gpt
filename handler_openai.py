@@ -212,7 +212,7 @@ def file_search():
         vector_id = send_to_openai_vector(headers, file, user_data)
         if vector_id is not None: user_data.add_vector(vector_id)
     if "content" not in body:
-        body["content"] = f"Fais moi un message qui indiques que tu as bien reçu les fichiers suivants pour le file-search: {', '.join(map(str, filenames))}. Dans le vector {user_data.get_vector()[0]}"
+        body["content"] = f"Dis moi si tu as bien reçu les fichiers suivants pour le file-search: {', '.join(map(str, filenames))}. Dans le vector {user_data.get_vector()[0]}"
     return handler_stream(headers, body, user_data)
 
 @app.route('/code-interpreter', methods=["POST"]) #curl -X POST http://localhost:8080/code-interpreter -H "Authorization: $tokenGPT" -F "data={\"id\":\"Olive\", \"model\":\"gpt-4.1\"};type=application/json" -F "file=@handler_gpt_event.py" -F "file=@handler_data.py" -F "file=@handler_openai.py"
@@ -227,7 +227,7 @@ def code_interpreter():
         filenames.append(file.filename)
         create_file(headers, file, user_data)
     if "content" not in body:
-        body["content"] = f"Fais moi un message qui indiques que tu as bien reçu les fichiers suivants pour le code-interpreter: {', '.join(map(str, filenames))}. Avec les ID de files suivant : {', '.join(map(str, user_data.get_files()))}"
+        body["content"] = f"Dis moi si tu as bien reçu les fichiers suivants pour le code-interpreter: {', '.join(map(str, filenames))}. Avec les ID de files suivant : {', '.join(map(str, user_data.get_files()))}"
     return handler_stream(headers, body, user_data)
 
 @app.route('/function', methods=["POST"]) #curl -X POST http://localhost:5000/function -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "content":"Jai un incident sur FPX de 4h à 9h. Je veux un ticket Canari et pas besoin de lopen bar", "filename":"function.json"}'
