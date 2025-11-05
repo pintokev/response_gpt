@@ -161,7 +161,9 @@ def create_ticket_incident(args):
 ########## Pour toutes utilisation du stream de réponse ##########
 def handler_stream(headers, body, user_data):
     client = get_client_openai(headers)
-    if "reasonning" not in body: body = {**body, **{"tools": [{"type": "web_search_preview"}]}}
+    if "reasonning" not in body:
+        if "tools" not in body: body = {**body, **{"tools": [{"type": "web_search_preview"}]}}
+        else: body["tools"].append({"type": "web_search_preview"})
     if "instructions" in body and "instructions" in user_data.get_instructions(): body["instructions"] += user_data.get_instructions()["instructions"]
     if user_data.get_vector(): body["tools"].append({"type": "file_search", "vector_store_ids": user_data.get_vector(), "max_num_results": 20})
     if user_data.get_files():
