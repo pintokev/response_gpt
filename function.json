@@ -1,40 +1,27 @@
 [
-   {
-      "type":"function",
-      "name":"create_ticket_incident",
-      "description":"Permet de créer un ticket d'incident",
-      "parameters":{
-         "type":"object",
-         "properties":{
-            "application":{
-               "type":"string",
-               "description":"L'application qui a provoqué l'incident"
-            },
-            "horaire_debut":{
-               "type":"string",
-               "description":"Heure de début de l'incident"
-            },
-            "horaire_fin":{
-               "type":"string",
-               "description":"Heure de fin de l'incident"
-            },
-            "type_ticket":{
-               "type":"string",
-               "description":"Défini le type de ticket de l'incident",
-               "enum": ["Oceane", "Canari"]
-            },
-            "isOpenBar":{
-               "type":"boolean",
-               "description":"Indique si l'on doit prévenir l'Open Bar ou no,"
-            }
-         },
-         "required":[
-            "application",
-            "horaire_debut",
-            "horaire_fin",
-            "type_ticket",
-            "isOpenBar"
-         ]
-      }
-   }
+  {
+    "type": "function",
+    "name": "categoriser_lignes",
+    "description": "Catégorise une ligne avec une catégorie principale et une sous-catégorie.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "categorie": {
+          "type": "string",
+          "enum": [
+            "Facture",
+            "Offre et option",
+            "Contrat",
+            "Dashboard",
+            "Autre"
+          ]
+        },
+        "sous_categorie": {
+          "type": "string"
+        }
+      },
+      "required": ["categorie", "sous_categorie"],
+      "additionalProperties": false
+    }
+  }
 ]

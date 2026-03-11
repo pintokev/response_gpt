@@ -15,8 +15,7 @@ import requests
 app = Flask(__name__)
 app.app_context().push()
 PORT = 8080
-BASE_URL = "https://llmproxy.ai.orange"
-PROXY=False
+PROXY=os.environ.get("PROXY", None)
 
 nouveau_param_obligatoire = ["content"]
 nouveau_param_valid = ["image_url"] + nouveau_param_obligatoire
@@ -69,17 +68,18 @@ def get_filtered_params(signature, **params):
 def get_client_openai(headers):
     # print(headers.get('Authorization'))
     # return OpenAI(api_key=headers.get('Authorization'), base_url=str(BASE_URL))
+    # try:
+    #     if not "sk-" in headers.get('Authorization'): raise
+    #     elif PROXY is None: return openai.OpenAI(api_key=headers.get('Authorization'))
+    #     else: return openai.OpenAI(api_key=headers.get('Authorization'), base_url=PROXY)
+    # except:
+    print(openai.OpenAI(api_key=os.environ.get("tokenGPT"), base_url=PROXY))
     try:
-        if not "sk-" in headers.get('Authorization'): raise
-        if not PROXY: return openai.OpenAI(api_key=headers.get('Authorization'))
-        else: return openai.OpenAI(api_key=headers.get('Authorization'), base_url=BASE_URL)
+        if PROXY is None: return openai.OpenAI(api_key=os.environ.get("tokenGPT"))
+        else: return openai.OpenAI(api_key=os.environ.get("tokenGPT"), base_url=PROXY)
     except:
-        try:
-            if not PROXY: return openai.OpenAI(api_key=os.environ.get("tokenGPT"))
-            else: return openai.OpenAI(api_key=headers.get('Authorization'), base_url=BASE_URL)
-        except:
-            if not PROXY: return openai.OpenAI()
-            else: return openai.OpenAI(api_key=headers.get('Authorization'), base_url=BASE_URL)
+        if PROXY is None: return openai.OpenAI()
+        else: return openai.OpenAI(base_url=PROXY)
 def generate_response(client, body, user_data):
     def generate():
         response = {"ERREUR": "Pas un generateur"}
@@ -203,7 +203,7 @@ def instructions():
 def file_search():
     headers = request.headers
     body = json.loads(request.form.get("data"))
-    print(request.files)
+    # print(request.files)
     filenames = []
     if 'file' not in request.files: return "Utilisation de file-search sans fichier dans la requête. Tu dois en mettre un\n", 400
     user_data = Data(body.pop("id"))
@@ -214,7 +214,7 @@ def file_search():
         vector_id = send_to_openai_vector(headers, file, user_data)
         if vector_id is not None: user_data.add_vector(vector_id)
     if "content" not in body:
-        body["content"] = f"Dis moi si tu as bien reçu les fichiers suivants pour le file-search: {', '.join(map(str, filenames))}. Dans le vector {user_data.get_vector()[0]}"
+        body["content"] = f"Répond seulement fichier reçu"
     return handler_stream(headers, body, user_data)
 
 @app.route('/code-interpreter', methods=["POST"]) #curl -X POST http://localhost:8080/code-interpreter -H "Authorization: $tokenGPT" -F "data={\"id\":\"Olive\", \"model\":\"gpt-4.1\"};type=application/json" -F "file=@handler_gpt_event.py" -F "file=@handler_data.py" -F "file=@handler_openai.py"
@@ -232,20 +232,42 @@ def code_interpreter():
         body["content"] = f"Dis moi si tu as bien reçu les fichiers suivants pour le code-interpreter: {', '.join(map(str, filenames))}. Avec les ID de files suivant : {', '.join(map(str, user_data.get_files()))}"
     return handler_stream(headers, body, user_data)
 
-@app.route('/function', methods=["POST"]) #curl -X POST http://localhost:5000/function -H "Content-Type: application/json" -H "Authorization: $tokenGPT" -d '{"id":"Olive", "model":"gpt-4o", "content":"Jai un incident sur FPX de 4h à 9h. Je veux un ticket Canari et pas besoin de lopen bar", "filename":"function.json"}'
+
+def categoriser_lignes(categorie, sous_categorie):
+    print(str(categorie), str(sous_categorie))
+    return {
+        "categorie": categorie,
+        "sous_categorie": sous_categorie
+    }
+
+@app.route('/function', methods=["POST"])
 def openai_function():
     body = request.json
     headers = request.headers
+
     with open(body["filename"], "r") as file:
         tools = json.load(file)
+
     client = get_client_openai(headers)
+
     response = client.responses.create(
         model=body["model"],
-        input=[{"role": "user", "content": body["content"]}],
+        input=body["content"],
+        tool_choice="required",
         tools=tools
     )
-    try: return globals()[response.output[0].name](response.output[0].arguments)+"\n", 200
-    except: return ""
+
+    try:
+        for item in response.output:
+            if item.type == "function_call":
+                fn_name = item.name
+                fn_args = json.loads(item.arguments)
+                return globals()[fn_name](**fn_args), 200
+
+        return "Pas de fonction appelée\n", 200
+
+    except Exception as e:
+        return f"Erreur: {str(e)}\n", 500
     # try:
     #     return globals()[response.output[0].name](**response.output[0].arguments)
     # except: return ""
