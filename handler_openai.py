@@ -27,13 +27,22 @@ def get_content_and_images(content, image_url):
         for image in image_url:
             content.append({"type": "input_image","image_url": image})
     return content
-def get_pipeline(**filtered_params):
+def get_pipeline(stream=True, **filtered_params):
     image_url = None
     content = filtered_params.pop("content")
-    if "image_url" in filtered_params: image_url = filtered_params.pop("image_url")
+
+    if "image_url" in filtered_params:
+        image_url = filtered_params.pop("image_url")
+
     for param_valid in nouveau_param_valid:
-        if param_valid in filtered_params: filtered_params.pop(param_valid)
-    pipeline = {**filtered_params, **{"input":[{"role":"user", "content":get_content_and_images(content, image_url)}]}, **{"stream":True}}
+        if param_valid in filtered_params:
+            filtered_params.pop(param_valid)
+
+    pipeline = {
+        **filtered_params,
+        "input": [{"role": "user", "content": get_content_and_images(content, image_url)}],
+        "stream": stream
+    }
     return pipeline
 def gestion_parametres(client, **params):
     signature = inspect.signature(client.responses.create)
@@ -73,7 +82,6 @@ def get_client_openai(headers):
     #     elif PROXY is None: return openai.OpenAI(api_key=headers.get('Authorization'))
     #     else: return openai.OpenAI(api_key=headers.get('Authorization'), base_url=PROXY)
     # except:
-    print(openai.OpenAI(api_key=os.environ.get("tokenGPT"), base_url=PROXY))
     try:
         if PROXY is None: return openai.OpenAI(api_key=os.environ.get("tokenGPT"))
         else: return openai.OpenAI(api_key=os.environ.get("tokenGPT"), base_url=PROXY)
@@ -83,11 +91,10 @@ def get_client_openai(headers):
 def generate_response(client, body, user_data):
     def generate():
         response = {"ERREUR": "Pas un generateur"}
-        for data in get_response_openai(client, user_data, **body):
-            if isinstance(data, types.GeneratorType):
-                response = list(data)[0]
-            elif isinstance(data, dict):
-                response = data
+
+        for data in get_response_with_function_calling(client, user_data, **body):
+            response = data
+
             if response.get("type") != "complete":
                 if "ERREUR" in response:
                     yield "ERREUR - " + response["ERREUR"]
@@ -95,6 +102,8 @@ def generate_response(client, body, user_data):
                     yield response.get("content", "")
             else:
                 user_data.add_historique("assistant", response.get("content", ""))
+                yield response.get("content", "")
+
         yield "\n"
     return generate()
 def get_response_openai(client, user_data, **params):
@@ -110,15 +119,76 @@ def get_response_openai(client, user_data, **params):
         yield {"ERREUR":"La cle API n'est pas bonne ou inexistante. Il faut la passer (par ordre de priorite) soit dans le Authorization Header ou la mettre dans une variable d'environnement tokenGPT ou OPENAI_API_KEY"}
     except KeyError:
         yield filtered_params
+
+def get_response_with_function_calling(client, user_data, **params):
+    filtered_params = gestion_parametres(client, **params)
+    if "ERREUR" in filtered_params:
+        yield {"ERREUR": filtered_params["ERREUR"]}
+        return
+
+    pipeline = create_pipeline(user_data, stream=False, **filtered_params)
+    pipeline["stream"] = False
+
+    while True:
+        response = client.responses.create(**pipeline)
+
+        assistant_text = []
+        function_calls = []
+
+        for item in response.output:
+            if item.type == "message":
+                for content in item.content:
+                    if content.type == "output_text":
+                        assistant_text.append(content.text)
+
+            elif item.type == "function_call":
+                function_calls.append(item)
+
+        if function_calls:
+            tool_items = []
+
+            for call in function_calls:
+                tool_items.append({
+                    "type": "function_call",
+                    "call_id": call.call_id,
+                    "name": call.name,
+                    "arguments": call.arguments
+                })
+
+                result = execute_function_call(call.name, call.arguments)
+                result = execute_function_call(call.name, call.arguments)
+
+                tool_items.append({
+                    "type": "function_call_output",
+                    "call_id": call.call_id,
+                    "output": json.dumps(result, ensure_ascii=False)
+                })
+
+            pipeline["input"] = pipeline["input"] + tool_items
+            pipeline["stream"] = False
+            continue
+
+        final_text = "\n".join(assistant_text).strip()
+        yield {"type": "complete", "content": final_text}
+        return
+
+
+
     # print(f"Stream de la réponse total en {round(time()-debut, 2)}secs")
-def create_pipeline(user_data, **filtered_params):
-    pipeline = get_pipeline(**filtered_params)
+def create_pipeline(user_data, stream=True, **filtered_params):
+    pipeline = get_pipeline(stream=stream, **filtered_params)
     conversation = user_data.get_historique()
     conversation.append(pipeline["input"][0])
     pipeline["input"] = conversation
     user_data.change_historique(conversation)
+
     instructions = user_data.get_instructions()
-    if "instructions" in instructions and instructions is not None: pipeline["instructions"] = instructions["instructions"]
+    if instructions is not None and "instructions" in instructions:
+        if "instructions" in pipeline and pipeline["instructions"]:
+            pipeline["instructions"] += "\n" + instructions["instructions"]
+        else:
+            pipeline["instructions"] = instructions["instructions"]
+
     return pipeline
 ########## fin stream ##########
 
@@ -161,14 +231,7 @@ def create_ticket_incident(args):
 ########## Pour toutes utilisation du stream de réponse ##########
 def handler_stream(headers, body, user_data):
     client = get_client_openai(headers)
-    if "reasonning" not in body:
-        if "tools" not in body: body = {**body, **{"tools": [{"type": "web_search_preview"}]}}
-        else: body["tools"].append({"type": "web_search_preview"})
-    if "instructions" in body and "instructions" in user_data.get_instructions(): body["instructions"] += user_data.get_instructions()["instructions"]
-    if user_data.get_vector(): body["tools"].append({"type": "file_search", "vector_store_ids": user_data.get_vector(), "max_num_results": 20})
-    if user_data.get_files():
-        container = client.containers.create(name="test-container", file_ids=user_data.get_files())
-        body["tools"].append({"type": "code_interpreter", "container": container.id})
+    body = build_stream_body(client, body, user_data)
     return Response(generate_response(client, body, user_data), content_type='application/json')
 ########## fin du handler du stream ##########
 
@@ -208,7 +271,6 @@ def file_search():
     if 'file' not in request.files: return "Utilisation de file-search sans fichier dans la requête. Tu dois en mettre un\n", 400
     user_data = Data(body.pop("id"))
     for file in request.files.getlist("file"):
-        print(file.filename)
         if file.filename == '': return "Aucun fichier renseigné\n", 400
         filenames.append(file.filename)
         vector_id = send_to_openai_vector(headers, file, user_data)
@@ -232,24 +294,104 @@ def code_interpreter():
         body["content"] = f"Dis moi si tu as bien reçu les fichiers suivants pour le code-interpreter: {', '.join(map(str, filenames))}. Avec les ID de files suivant : {', '.join(map(str, user_data.get_files()))}"
     return handler_stream(headers, body, user_data)
 
+from Function.tools import tools
+from Function.functions import categoriser_lignes, count_by_categorie, get_examples_by_categorie, check_factures
 
-def categoriser_lignes(categorie, sous_categorie):
-    print(str(categorie), str(sous_categorie))
-    return {
-        "categorie": categorie,
-        "sous_categorie": sous_categorie
-    }
+AVAILABLE_FUNCTIONS = {
+    "categoriser_lignes": categoriser_lignes,
+    "count_by_categorie": count_by_categorie,
+    "get_examples_by_categorie": get_examples_by_categorie,
+    "check_factures": check_factures
+}
+
+def ensure_body_tools(body):
+    if "tools" not in body or body["tools"] is None:
+        body["tools"] = []
+    return body
+
+
+def append_tool_if_missing(body, tool):
+    body = ensure_body_tools(body)
+    if tool not in body["tools"]:
+        body["tools"].append(tool)
+    return body
+
+
+def append_function_tools(body):
+    body = ensure_body_tools(body)
+
+    existing_names = set()
+    for tool in body["tools"]:
+        if isinstance(tool, dict) and tool.get("type") == "function":
+            existing_names.add(tool.get("name"))
+
+    for tool in tools:
+        if tool["name"] not in existing_names:
+            body["tools"].append(tool)
+
+    return body
+
+
+def build_stream_body(client, body, user_data):
+    body = ensure_body_tools(body)
+
+    if "reasonning" not in body:
+        append_tool_if_missing(body, {"type": "web_search_preview"})
+
+    if user_data.get_vector():
+        append_tool_if_missing(body, {
+            "type": "file_search",
+            "vector_store_ids": user_data.get_vector(),
+            "max_num_results": 20
+        })
+
+    if user_data.get_files():
+        container = client.containers.create(
+            name="test-container",
+            file_ids=user_data.get_files()
+        )
+        body["tools"].append({
+            "type": "code_interpreter",
+            "container": container.id
+        })
+
+    body = append_function_tools(body)
+
+    user_instructions = user_data.get_instructions()
+    if user_instructions is not None and "instructions" in user_instructions:
+        if "instructions" in body and body["instructions"]:
+            body["instructions"] += "\n" + user_instructions["instructions"]
+        else:
+            body["instructions"] = user_instructions["instructions"]
+
+    return body
+
+
+def execute_function_call(function_name, function_args):
+    if function_name not in AVAILABLE_FUNCTIONS:
+        return {
+            "error": f"Fonction inconnue: {function_name}"
+        }
+
+    try:
+        if isinstance(function_args, str):
+            function_args = json.loads(function_args)
+
+        if function_args is None:
+            function_args = {}
+
+        result = AVAILABLE_FUNCTIONS[function_name](**function_args)
+        return result
+    except Exception as e:
+        return {
+            "error": f"Erreur lors de l'exécution de {function_name}: {str(e)}"
+        }
 
 @app.route('/function', methods=["POST"])
 def openai_function():
     body = request.json
     headers = request.headers
-
-    with open(body["filename"], "r") as file:
-        tools = json.load(file)
-
     client = get_client_openai(headers)
-
     response = client.responses.create(
         model=body["model"],
         input=body["content"],
@@ -262,15 +404,12 @@ def openai_function():
             if item.type == "function_call":
                 fn_name = item.name
                 fn_args = json.loads(item.arguments)
-                return globals()[fn_name](**fn_args), 200
+                return AVAILABLE_FUNCTIONS[fn_name](**fn_args), 200
 
         return "Pas de fonction appelée\n", 200
 
     except Exception as e:
         return f"Erreur: {str(e)}\n", 500
-    # try:
-    #     return globals()[response.output[0].name](**response.output[0].arguments)
-    # except: return ""
 
 @app.route('/clear', methods=["POST"])
 def clear():
