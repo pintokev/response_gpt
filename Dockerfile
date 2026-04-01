@@ -1,7 +1,7 @@
-FROM python:3.12-slim
+FROM python:3.13-slim
 WORKDIR /app
 COPY . /app
 RUN pip install -r requirements.txt
 EXPOSE 8080
-CMD ["python", "handler_openai.py"]
+CMD ["gunicorn", "-b", "0.0.0.0:8080", "handler_openai:app"]
 
