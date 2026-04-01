@@ -295,13 +295,15 @@ def code_interpreter():
     return handler_stream(headers, body, user_data)
 
 from Function.tools import tools
-from Function.functions import categoriser_lignes, count_by_categorie, get_examples_by_categorie, check_factures
+from Function.functions import categoriser_lignes, count_by_categorie, get_examples_by_categorie, check_factures, \
+    call_accueil_facture
 
 AVAILABLE_FUNCTIONS = {
     "categoriser_lignes": categoriser_lignes,
     "count_by_categorie": count_by_categorie,
     "get_examples_by_categorie": get_examples_by_categorie,
-    "check_factures": check_factures
+    "check_factures": check_factures,
+    "call_accueil_facture": call_accueil_facture
 }
 
 def ensure_body_tools(body):

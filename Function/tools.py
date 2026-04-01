@@ -32,7 +32,7 @@ tools = [
                 },
                 "filename": {
                     "type": "string",
-                    "description": "Nom du fichier CSV à analyser."
+                    "description": "Nom du fichier CSV à analyser. Par défaut tickets.csv"
                 }
             },
             "required": ["categorie"],
@@ -42,7 +42,7 @@ tools = [
     {
         "type": "function",
         "name": "get_examples_by_categorie",
-        "description": "Retourne quelques exemples de lignes correspondant à une catégorie donnée.",
+        "description": "Retourne des exemples de lignes correspondant à une catégorie donnée, avec pagination via offset et limit.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -51,14 +51,21 @@ tools = [
                     "description": "Code catégorie à filtrer.",
                     "enum": CATEGORIES
                 },
+                "offset": {
+                    "type": "integer",
+                    "description": "Position de départ dans les résultats filtrés.",
+                    "default": 0,
+                    "minimum": 0
+                },
                 "limit": {
                     "type": "integer",
                     "description": "Nombre maximum d'exemples à retourner.",
-                    "default": 10
+                    "default": 10,
+                    "minimum": 1
                 },
                 "filename": {
                     "type": "string",
-                    "description": "Nom du fichier CSV à analyser."
+                    "description": "Nom du fichier CSV à analyser. Par défaut tickets.csv"
                 }
             },
             "required": ["categorie"],
@@ -79,10 +86,26 @@ tools = [
                 },
                 "filename": {
                     "type": "string",
-                    "description": "Nom du fichier CSV à mettre à jour."
+                    "description": "Nom du fichier CSV à mettre à jour. Par défaut tickets.csv"
                 }
            },
             "required": ["categorie"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "type": "function",
+        "name": "call_accueil_facture",
+        "description": "Récupère les infos de facture pour un contractKey donné (le contractkey est une clé client qui représente un numéro mobile, un numéro fixe ou un numéro internet (suite de 9 chiffres)",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "contractKey": {
+                    "type": "string",
+                    "description": "Clé contrat, ex: numéro mobile, fixe ou identifiant internet"
+                }
+            },
+            "required": ["contractKey"],
             "additionalProperties": False
         }
     }

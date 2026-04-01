@@ -1,4 +1,6 @@
 import pandas as pd
+import requests
+from flask import request
 
 
 def categoriser_lignes(categorie):
@@ -15,12 +17,26 @@ def count_by_categorie(categorie, filename="tickets.csv"):
     }
 
 
-def get_examples_by_categorie(categorie, limit=10, filename="tickets.csv"):
+def get_examples_by_categorie(categorie, offset=0, limit=10, filename="tickets.csv"):
+    if offset < 0:
+        return {"error": "offset doit être >= 0"}
+    if limit <= 0:
+        return {"error": "limit doit être > 0"}
+
     df = pd.read_csv(filename)
-    examples = df[df["categorie"] == categorie].head(limit).to_dict(orient="records")
+    filtered = df[df["categorie"] == categorie].reset_index(drop=True)
+
+    total = len(filtered)
+    examples = filtered.iloc[offset:offset + limit].to_dict(orient="records")
+    has_more = offset + limit < total
 
     return {
         "categorie": categorie,
+        "offset": offset,
+        "limit": limit,
+        "returned": len(examples),
+        "total": total,
+        "has_more": has_more,
         "examples": examples
     }
 
@@ -47,3 +63,13 @@ def check_factures(categorie, filename="tickets.csv"):
 
 def get_pdf(row):
     return "OK"
+
+def call_accueil_facture(contractKey):
+    response = requests.get(
+        "http://orange_api:5000/facture/accueil",
+        params={"contractKey": contractKey},
+        headers={"Host": "localhost:5000"},
+        timeout=30
+    )
+    response.raise_for_status()
+    return response.json()
